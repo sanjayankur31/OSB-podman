@@ -38,10 +38,11 @@ function run_container ()
 {
     mkdir -pv "$MYSQL_HOSTDIR" && \
     podman run --name "$CONTAINER_NAME" --env 'DB_NAME=redmine,geppetto' \
-    --env 'DB_USER=user_name' --env 'DB_PASS=password' \
-    --volume '/mnt/Scratch/mysql:/var/lib/mysql' \
-    --security-opt="label=disable" --publish "3306:3306" \
-    --rm -d docker.io/sameersbn/mysql
+        --env 'DB_USER=user_name' --env 'DB_PASS=password' \
+        --volume '/mnt/Scratch/mysql:/var/lib/mysql' \
+        --security-opt="label=disable" --publish "3306:3306" \
+        --rm -d docker.io/sameersbn/mysql
+
 }
 
 function enter_interactive ()
@@ -62,7 +63,7 @@ function import_database ()
 
 function usage()
 {
-    echo "$0 [-ri]"
+    echo "$0 [-rimp]"
     echo 
     echo "OPTIONS"
     echo
