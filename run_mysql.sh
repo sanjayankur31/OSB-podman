@@ -51,7 +51,13 @@ function enter_interactive ()
 
 function try_mysql ()
 {
-    mysql -u user_name -h 0.0.0.0 -P 3306 -p
+    mysql -uuser_name -h 0.0.0.0 -P 3306 -ppassword
+}
+
+function import_database ()
+{
+    mysql -uuser_name -ppassword -h 0.0.0.0 -P 3306 redmine < ~/Sync/2020-OSB/redmine.sql && \
+    mysql -uuser_name -ppassword -h 0.0.0.0 -P 3306 geppetto < ~/Sync/2020-OSB/geppetto.sql
 }
 
 function usage()
@@ -63,20 +69,32 @@ function usage()
     echo "-r pull image and run container"
     echo "-i enter container interactively"
     echo "-m connect using mysql client"
+    echo "-p import database"
 }
 
 # parse options
-while getopts "rim" OPTION
+while getopts "rimph" OPTION
 do
     case $OPTION in
         r)
             check_selinux && fetch_image && run_container
+            exit 0
             ;;
         i)
             enter_interactive
+            exit 0
             ;;
         m)
             try_mysql
+            exit 0
+            ;;
+        p)
+            import_database
+            exit 0
+            ;;
+        h)
+            usage
+            exit 0
             ;;
         ?)
             echo "Nothing to do."
