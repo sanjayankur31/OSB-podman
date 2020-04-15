@@ -14,6 +14,7 @@
 SELINUX_ACTIVE="$(getenforce)"
 MYSQL_HOSTDIR="/mnt/Scratch/mysql"
 CONTAINER_NAME="osb-mysql"
+PODNAME="osb"
 
 function check_selinux ()
 {
@@ -37,10 +38,13 @@ function fetch_image ()
 function run_container ()
 {
     mkdir -pv "$MYSQL_HOSTDIR" && \
-    podman run --name "$CONTAINER_NAME" --env 'DB_NAME=redmine,geppetto' \
-        --env 'DB_USER=user_name' --env 'DB_PASS=password' \
+        podman run --name "$CONTAINER_NAME" \
+        --env 'DB_NAME=redmine,geppetto' \
+        --env 'DB_USER=user_name' \
+        --env 'DB_PASS=password' \
         --volume '/mnt/Scratch/mysql:/var/lib/mysql' \
-        --security-opt="label=disable" --publish "3306:3306" \
+        --security-opt="label=disable" --expose=3306 \
+        --pod=$PODNAME \
         --rm -d docker.io/sameersbn/mysql
 
 }
