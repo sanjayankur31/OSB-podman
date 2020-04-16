@@ -8,32 +8,42 @@
 SELINUX_ACTIVE="$(getenforce)"
 
 PODNAME="osb"
+RECREATE_POD="no"
 
-REDMINE_CONTAINER_NAME="osb-redmine"
 REDMINE_IMAGE_NAME="redmine"
+REDMINE_CONTAINER_NAME="osb-redmine"
 REDMINE_HOSTDIR="/mnt/Scratch/redmine"
 
 MYSQL_CONTAINER_NAME="osb-mysql"
 MYSQL_HOSTDIR="/mnt/Scratch/mysql"
 
+GEPPETTO_IMAGE_NAME="geppetto"
+GEPPETTO_CONTAINER_NAME="osb-geppetto"
+
 function create_pod ()
 {
-    # don't error if this can't find a pod
-    podman pod exists $PODNAME && podman pod rm -f $PODNAME
-    podman pod create --name $PODNAME --hostname $PODNAME \
-        --publish 10083:80 --publish 3306:3306 --publish 8080:8080
+    if [ "yes" = "$RECREATE_POD" ]
+    then
+        podman pod exists $PODNAME && podman pod rm -f $PODNAME
+    fi
+
+    # Otherwise try to create it if it doesn't exist anyway
+    podman pod exists $PODNAME || podman pod create --name $PODNAME --hostname $PODNAME \
+        --publish 10083:80 --publish 10084:10084 \
+        --publish 3306:3306 --publish 8080:8080
 }
 
 function start_pod ()
 {
     # don't error if this can't find a pod
+    # starting a pod starts all the containers in it
     podman pod exists $PODNAME && podman pod start $PODNAME
 }
 
 function stop_pod ()
 {
     # don't error if this can't find a pod
-    podman pod exists $PODNAME && podman pod stop $PODNAME
+    podman pod exists $PODNAME && podman pod stop $PODNAME && podman pod rm $PODNAME
 }
 
 function check_selinux ()
@@ -55,17 +65,24 @@ function fetch_mysql_image ()
 
 }
 
-function run_mysql_container ()
+function create_mysql_container ()
 {
+    podman container rm "$MYSQL_CONTAINER_NAME"
     mkdir -pv "$MYSQL_HOSTDIR" && \
-        podman run --name "$MYSQL_CONTAINER_NAME" \
+        podman create --name "$MYSQL_CONTAINER_NAME" \
         --env 'DB_NAME=redmine,geppetto' \
         --env 'DB_USER=user_name' \
         --env 'DB_PASS=password' \
         --volume '/mnt/Scratch/mysql:/var/lib/mysql' \
         --security-opt="label=disable" --expose=3306 \
         --pod=$PODNAME \
-        --rm -d docker.io/sameersbn/mysql
+        -d docker.io/sameersbn/mysql
+
+}
+
+function start_mysql_container ()
+{
+    podman start "$MYSQL_CONTAINER_NAME"
 
 }
 
@@ -103,10 +120,11 @@ function build_redmine_image ()
 
 }
 
-function run_redmine_container ()
+function create_redmine_container ()
 {
+    podman container rm "$REDMINE_CONTAINER_NAME"
     mkdir -pv "$REDMINE_HOSTDIR" && \
-        podman run --name "$REDMINE_CONTAINER_NAME" --env 'DB_NAME=redmine,geppetto' \
+        podman create --name "$REDMINE_CONTAINER_NAME" --env 'DB_NAME=redmine,geppetto' \
         --env 'TZ=Asia/Kolkata' \
         --env 'DB_ADAPTER=mysql2' \
         --env 'DB_HOST=osb' \
@@ -140,6 +158,7 @@ function run_redmine_container ()
         --env 'IMAP_PASS=password' \
         --env 'IMAP_SSL=true' \
         --env 'IMAP_INTERVAL=30' \
+        --env 'NGINX_ENABLED=true' \
         --security-opt="label=disable" \
         --expose=10083 \
         --expose=80 \
@@ -147,9 +166,14 @@ function run_redmine_container ()
         --pod=$PODNAME \
         --volume '/mnt/Scratch/redmine:/home/redmine/data' \
         --volume '/mnt/Scratch/myGitRepositories:/home/svnsvn/myGitRepositories' \
-        --rm "$REDMINE_IMAGE_NAME"
+        "$REDMINE_IMAGE_NAME"
 }
 
+function start_redmine_container ()
+{
+    podman start "$REDMINE_CONTAINER_NAME"
+
+}
 
 function enter_redmine_interactive ()
 {
@@ -158,37 +182,54 @@ function enter_redmine_interactive ()
 
 function build_geppetto_image ()
 {
-    echo "Placeholder. Nothing to see here."
+    podman build --tag "$GEPPETTO_IMAGE_NAME" \
+        --build-arg="SERVER_IP=http://localhost:10083/" \
+        --build-arg="GEPPETTO_IP=http://localhost:8080/" \
+        --security-opt="label=disable" --userns=host \
+        --force-rm=true \
+        -f ~/Documents/02_Code/00_mine/2020-OSB/docker-osb/Dockerfile
 }
 
-function run_geppetto_container ()
+function create_geppetto_container ()
 {
-    echo "Placeholder. Nothing to see here."
+    podman container rm "$GEPPETTO_CONTAINER_NAME"
+    podman create --name "$GEPPETTO_CONTAINER_NAME" \
+        --security-opt="label=disable" \
+        --expose=8080 \
+        --userns=host \
+        --pod=$PODNAME \
+        "$GEPPETTO_IMAGE_NAME"
+}
+
+function start_geppetto_container ()
+{
+    podman start "$GEPPETTO_CONTAINER_NAME"
 }
 
 function enter_geppetto_interactive ()
 {
-    echo "Placeholder. Nothing to see here."
+    podman exec -it "$GEPPETTO_CONTAINER_NAME" /bin/bash
 }
 
 
 function usage()
 {
-    echo "$0 [-rimbsSbt]"
+    echo "$0 [-csSbtimh]"
     echo
     echo "OPTIONS:"
-    echo "-r create pod and run all containers"
-    echo "-s start the pod and all containers"
+    echo "-r destroy and recreate pod: required if ports have been updated"
+    echo "-c [all|pod|redmine|geppetto|mysql] create pod and specified container"
+    echo "-s [all|pod|redmine|geppetto|mysql] start pod and specified container"
     echo "-S stop the pod and all containers"
     echo "-b [all|redmine|geppetto] build specified image"
     echo "-t [redmine|geppetto|mysql] enter container interactively"
-    echo "-i import database into mysql container: assumes that pod and mysql container are running"
+    echo "-i [yes] import database into mysql container: assumes that pod and mysql container are running"
     echo "-m connect to mysql database using mysql client"
     echo "-h print usage and exit"
     echo
 }
 
-if [ "$#" -ne 1 ]
+if [ "$#" -lt 1 ]
 then
     echo "Needs at least one option"
     usage
@@ -196,21 +237,59 @@ then
 fi
 
 # parse options
-while getopts "rib:t:sSh" OPTION
+while getopts "r:c:s:Sb:t:i:mh" OPTION
 do
     case $OPTION in
         r)
-            create_pod
-            run_mysql_container
-            run_redmine_container
-            run_geppetto_container
+            RECREATE_POD="$OPTARG"
+            ;;
+        c)
+            if [ "all" = "$OPTARG" ]
+            then
+                create_pod
+                create_mysql_container
+                create_geppetto_container && \
+                create_redmine_container
+            elif [ "pod" = "$OPTARG" ]
+            then
+                create_pod
+            elif [ "redmine" = "$OPTARG" ]
+            then
+                create_pod
+                create_mysql_container
+                create_redmine_container
+            elif [ "geppetto" = "$OPTARG" ]
+            then
+                create_pod && \
+                create_geppetto_container
+            elif [ "mysql" = "$OPTARG" ]
+            then
+                create_pod && \
+                create_mysql_container
+            fi
             exit 0
             ;;
         s)
-            start_pod
-            run_mysql_container
-            run_redmine_container
-            run_geppetto_container
+            if [ "all" = "$OPTARG" ]
+            then
+                start_pod
+            elif [ "pod" = "$OPTARG" ]
+            then
+                start_pod
+            elif [ "redmine" = "$OPTARG" ]
+            then
+                start_pod
+                start_mysql_container
+                start_redmine_container
+            elif [ "geppetto" = "$OPTARG" ]
+            then
+                start_pod && \
+                start_geppetto_container
+            elif [ "mysql" = "$OPTARG" ]
+            then
+                start_pod && \
+                start_mysql_container
+            fi
             exit 0
             ;;
         S)
@@ -248,7 +327,10 @@ do
             exit 0
             ;;
         i)
-            import_database
+            if [ "yes" = "$OPTARG" ]
+            then
+                import_database
+            fi
             exit 0
             ;;
         m)
